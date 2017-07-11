@@ -19,9 +19,6 @@ package org.bdgenomics.cannoli
 
 import htsjdk.samtools.ValidationStringency
 import org.apache.spark.SparkContext
-import org.apache.spark.SparkContext._
-import org.apache.spark.rdd.RDD
-import org.bdgenomics.adam.converters.DefaultHeaderLines
 import org.bdgenomics.adam.models.VariantContext
 import org.bdgenomics.adam.rdd.ADAMContext._
 import org.bdgenomics.adam.rdd.ADAMSaveAnyArgs
@@ -44,7 +41,7 @@ class FreebayesArgs extends Args4jBase with ADAMSaveAnyArgs with ParquetArgs {
   @Argument(required = true, metaVar = "INPUT", usage = "Location to pipe from.", index = 0)
   var inputPath: String = null
 
-  @Argument(required = true, metaVar = "OUTPUT", usage = "Location to pipe to.", index = 1)
+  @Argument(required = true, metaVar = "OUTPUT", usage = "Location to pipe to, in VCF format.", index = 1)
   var outputPath: String = null
 
   @Args4jOption(required = false, name = "-freebayes_path", usage = "Path to the Freebayes executable. Defaults to freebayes.")
@@ -65,6 +62,9 @@ class FreebayesArgs extends Args4jBase with ADAMSaveAnyArgs with ParquetArgs {
   @Args4jOption(required = false, name = "-defer_merging", usage = "Defers merging single file output.")
   var deferMerging: Boolean = false
 
+  @Args4jOption(required = false, name = "-disable_fast_concat", usage = "Disables the parallel file concatenation engine.")
+  var disableFastConcat: Boolean = false
+
   @Args4jOption(required = false, name = "-stringency", usage = "Stringency level for various checks; can be SILENT, LENIENT, or STRICT. Defaults to STRICT.")
   var stringency: String = "STRICT"
 
@@ -77,13 +77,13 @@ class FreebayesArgs extends Args4jBase with ADAMSaveAnyArgs with ParquetArgs {
  */
 class Freebayes(protected val args: FreebayesArgs) extends BDGSparkCommand[FreebayesArgs] with Logging {
   val companion = Freebayes
-  val stringency = ValidationStringency.valueOf(args.stringency)
+  val stringency: ValidationStringency = ValidationStringency.valueOf(args.stringency)
 
   def run(sc: SparkContext) {
     val input: AlignmentRecordRDD = sc.loadAlignments(args.inputPath, stringency = stringency)
 
     implicit val tFormatter = BAMInFormatter
-    implicit val uFormatter = new VCFOutFormatter(DefaultHeaderLines.allHeaderLines)
+    implicit val uFormatter = new VCFOutFormatter
 
     val freebayesCommand = if (args.useDocker) {
       Seq("docker",
@@ -103,6 +103,6 @@ class Freebayes(protected val args: FreebayesArgs) extends BDGSparkCommand[Freeb
     val output: VariantContextRDD = input.pipe[VariantContext, VariantContextRDD, BAMInFormatter](freebayesCommand)
       .transform(_.cache())
 
-    output.saveAsVcf(args.outputPath, args.asSingleFile, stringency)
+    output.saveAsVcf(args, stringency)
   }
 }

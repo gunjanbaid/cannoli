@@ -17,10 +17,8 @@
  */
 package org.bdgenomics.cannoli
 
-import htsjdk.samtools.ValidationStringency
+import org.apache.hadoop.fs.{ FileSystem, Path }
 import org.apache.spark.SparkContext
-import org.apache.spark.SparkContext._
-import org.apache.spark.rdd.RDD
 import org.bdgenomics.adam.models.{
   RecordGroup,
   RecordGroupDictionary
@@ -69,6 +67,9 @@ class BwaArgs extends Args4jBase with ADAMSaveAnyArgs with ParquetArgs {
   @Args4jOption(required = false, name = "-defer_merging", usage = "Defers merging single file output.")
   var deferMerging: Boolean = false
 
+  @Args4jOption(required = false, name = "-disable_fast_concat", usage = "Disables the parallel file concatenation engine.")
+  var disableFastConcat: Boolean = false
+
   @Args4jOption(required = false, name = "-bwa_path", usage = "Path to the BWA executable. Defaults to bwa.")
   var bwaPath: String = "bwa"
 
@@ -81,11 +82,17 @@ class BwaArgs extends Args4jBase with ADAMSaveAnyArgs with ParquetArgs {
   @Args4jOption(required = false, name = "-use_docker", usage = "If true, uses Docker to launch BWA. If false, uses the BWA executable path.")
   var useDocker: Boolean = false
 
+  @Args4jOption(required = false, name = "-docker_cmd", usage = "The docker command to run. Defaults to 'docker'.")
+  var dockerCmd: String = "docker"
+
   @Args4jOption(required = false, name = "-force_load_ifastq", usage = "Forces loading using interleaved FASTQ.")
   var forceLoadIfastq: Boolean = false
 
   @Args4jOption(required = false, name = "-force_load_parquet", usage = "Forces loading using Parquet.")
   var forceLoadParquet: Boolean = false
+
+  @Args4jOption(required = false, name = "-add_indices", usage = "Adds index files via SparkFiles mechanism.")
+  var addIndices: Boolean = false
 
   // must be defined due to ADAMSaveAnyArgs, but unused here
   var sortFastqOutput: Boolean = false
@@ -115,24 +122,77 @@ class Bwa(protected val args: BwaArgs) extends BDGSparkCommand[BwaArgs] with Log
 
     val sample = args.sample
 
-    val bwaCommand = if (args.useDocker) {
-      Seq("docker",
+    def getIndexPaths(fastaPath: String): Seq[String] = {
+      val requiredExtensions = Seq("",
+        ".amb",
+        ".ann",
+        ".bwt",
+        ".pac",
+        ".sa")
+      val optionalExtensions = Seq(".alt")
+
+      // oddly, the hadoop fs apis don't seem to have a way to do this?
+      def canonicalizePath(fs: FileSystem, path: Path): String = {
+        val fsUri = fs.getUri()
+        new Path(fsUri.getScheme, fsUri.getAuthority,
+          Path.getPathWithoutSchemeAndAuthority(path).toString).toString
+      }
+
+      def optionalPath(ext: String): Option[String] = {
+        val path = new Path(fastaPath, ext)
+        val fs = path.getFileSystem(sc.hadoopConfiguration)
+        if (fs.exists(path)) {
+          Some(canonicalizePath(fs, path))
+        } else {
+          None
+        }
+      }
+
+      val pathsWithScheme = requiredExtensions.map(ext => {
+        optionalPath(ext).getOrElse({
+          throw new IllegalStateException(
+            "Required index file %s%s does not exist.".format(fastaPath, ext))
+        })
+      })
+
+      val optionalPathsWithScheme = optionalExtensions.flatMap(optionalPath)
+
+      pathsWithScheme ++ optionalPathsWithScheme
+    }
+
+    val (filesToAdd, bwaCommand) = if (args.useDocker) {
+      val (mountpoint, indexPath, filesToMount) = if (args.addIndices) {
+        ("$root", "$0", getIndexPaths(args.indexPath))
+      } else {
+        (Path.getPathWithoutSchemeAndAuthority(new Path(args.indexPath).getParent()).toString,
+          args.indexPath,
+          Seq.empty)
+      }
+
+      (filesToMount, Seq(args.dockerCmd,
+        "-v", "%s:%s".format(mountpoint, mountpoint),
         "run",
         args.dockerImage,
         "mem",
         "-t", "1",
         "-R", s"@RG\\tID:${sample}\\tLB:${sample}\\tPL:ILLUMINA\\tPU:0\\tSM:${sample}",
         "-p",
-        args.indexPath,
-        "-").mkString(" ")
+        indexPath,
+        "-").mkString(" "))
     } else {
-      Seq(args.bwaPath,
+      val (indexPath, filesToMount) = if (args.addIndices) {
+        ("$0", getIndexPaths(args.indexPath))
+      } else {
+        (args.indexPath, Seq.empty)
+      }
+
+      (filesToMount, Seq(args.bwaPath,
         "mem",
         "-t", "1",
         "-R", s"@RG\\tID:${sample}\\tLB:${sample}\\tPL:ILLUMINA\\tPU:0\\tSM:${sample}",
         "-p",
         args.indexPath,
-        "-").mkString(" ")
+        "-").mkString(" "))
     }
 
     val output: AlignmentRecordRDD = input.pipe[AlignmentRecord, AlignmentRecordRDD, InterleavedFASTQInFormatter](bwaCommand)
