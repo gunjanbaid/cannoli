@@ -18,14 +18,11 @@
 package org.bdgenomics.cannoli
 
 import htsjdk.samtools.ValidationStringency
+import org.bdgenomics.adam.rdd.read.{ AlignmentRecordRDD, BAMInFormatter }
 import org.apache.spark.SparkContext
-import org.apache.spark.SparkContext._
-import org.apache.spark.rdd.RDD
 import org.bdgenomics.adam.rdd.ADAMContext._
 import org.bdgenomics.adam.rdd.ADAMSaveAnyArgs
-import org.bdgenomics.adam.rdd.fragment.{ FragmentRDD, InterleavedFASTQInFormatter }
-import org.bdgenomics.adam.rdd.read.{ AlignmentRecordRDD, AnySAMOutFormatter }
-import org.bdgenomics.formats.avro.AlignmentRecord
+import org.bdgenomics.adam.rdd.feature.{ BEDInFormatter, BEDOutFormatter, FeatureRDD }
 import org.bdgenomics.utils.cli._
 import org.bdgenomics.utils.misc.Logging
 import org.kohsuke.args4j.{ Argument, Option => Args4jOption }
@@ -40,13 +37,26 @@ object Macs2 extends BDGCommandCompanion {
 }
 
 class Macs2Args extends Args4jBase with ADAMSaveAnyArgs with ParquetArgs {
-  // currently only adding support for one MACS2 function: callpeak 
-  // -Gunjan
-
-  // callpeak only has one required parameter: -t 
-  // -Gunjan
-  @Args4jOption(required = true, name = "-t", aliases = {"-treatment"}, usage = "Input treatment file. File can be in any supported format specified by –format option.")
+  @Argument(required = false, metaVar = "INPUT", usage = "Location to pipe from, in interleaved FASTQ format.", index = 0)
   var inputPath: String = null
+
+  @Argument(required = false, metaVar = "OUTPUT", usage = "Location to pipe to.", index = 1)
+  var outputPath: String = null
+
+  @Args4jOption(required = true, name = "-t", usage = "Input treatment file. File can be in BED or BAM format.")
+  var treatmentFile: String = null
+
+  @Args4jOption(required = false, name = "-single", usage = "Saves OUTPUT as single file.")
+  var asSingleFile: Boolean = false
+
+  @Args4jOption(required = false, name = "-defer_merging", usage = "Defers merging single file output.")
+  var deferMerging: Boolean = false
+
+  @Args4jOption(required = false, name = "-disable_fast_concat", usage = "Disables the parallel file concatenation engine.")
+  var disableFastConcat: Boolean = false
+
+  @Args4jOption(required = false, name = "-stringency", usage = "Stringency level for various checks; can be SILENT, LENIENT, or STRICT. Defaults to STRICT.")
+  var stringency: String = "STRICT"
 
   // must be defined due to ADAMSaveAnyArgs, but unused here
   var sortFastqOutput: Boolean = false
@@ -60,21 +70,12 @@ class Macs2(protected val args: Macs2Args) extends BDGSparkCommand[Macs2Args] wi
   val stringency = ValidationStringency.valueOf(args.stringency)
 
   def run(sc: SparkContext) {
-    // not sure if FragmentRDD the right choice here
-    // -Gunjan
-    val input: FragmentRDD = sc.loadFragments(args.inputPath)
+    val macs2Command = "./run-macs2.sh"
 
-    // not sure about the right choice for formatter types since
-    // MACS2 input file can be of many formats: “ELAND”, “BED”, “ELANDMULTI”, “ELANDEXPORT” 
-    // “ELANDMULTIPET” (for pair-end tags), “SAM”, “BAM”, “BOWTIE”, “BAMPE” or “BEDPE”
-    // -Gunjan
-    
-    //implicit val tFormatter =  
-    //implicit val uFormatter =  
-
-    val macs2Command = "macs2 callpeak -t " + args.inputPath
-
-    // callpeak outputs many files
-    // not sure how to use pipe and format output
+    val input: FeatureRDD = sc.loadFeatures(args.treatmentFile)
+    implicit val tFormatter = BEDInFormatter
+    implicit val uFormatter = new BEDOutFormatter
+    val output: FeatureRDD = input.pipe(macs2Command)
+    output.save("output.bed", true, false)
   }
 }
