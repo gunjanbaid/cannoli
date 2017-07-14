@@ -26,6 +26,9 @@ import org.bdgenomics.adam.rdd.feature.{ BEDInFormatter, BEDOutFormatter, Featur
 import org.bdgenomics.utils.cli._
 import org.bdgenomics.utils.misc.Logging
 import org.kohsuke.args4j.{ Argument, Option => Args4jOption }
+import org.apache.spark.rdd.RDD
+import org.apache.spark.HashPartitioner
+import org.bdgenomics.adam.models._
 
 object Macs2 extends BDGCommandCompanion {
   val commandName = "macs2"
@@ -37,14 +40,14 @@ object Macs2 extends BDGCommandCompanion {
 }
 
 class Macs2Args extends Args4jBase with ADAMSaveAnyArgs with ParquetArgs {
-  @Argument(required = false, metaVar = "INPUT", usage = "Location to pipe from, in interleaved FASTQ format.", index = 0)
+  @Argument(required = true, metaVar = "function", usage = "Location to pipe from, in interleaved FASTQ format.", index = 0)
+  var function: String = null
+
+  @Argument(required = true, metaVar = "INPUT", usage = "Location to pipe from, in interleaved FASTQ format.", index = 1)
   var inputPath: String = null
 
-  @Argument(required = false, metaVar = "OUTPUT", usage = "Location to pipe to.", index = 1)
+  @Argument(required = true, metaVar = "OUTPUT", usage = "Location to pipe to.", index = 2)
   var outputPath: String = null
-
-  @Args4jOption(required = true, name = "-t", usage = "Input treatment file. File can be in BED or BAM format.")
-  var treatmentFile: String = null
 
   @Args4jOption(required = false, name = "-single", usage = "Saves OUTPUT as single file.")
   var asSingleFile: Boolean = false
@@ -70,12 +73,12 @@ class Macs2(protected val args: Macs2Args) extends BDGSparkCommand[Macs2Args] wi
   val stringency = ValidationStringency.valueOf(args.stringency)
 
   def run(sc: SparkContext) {
-    val macs2Command = "./run-macs2.sh"
-
-    val input: FeatureRDD = sc.loadFeatures(args.treatmentFile)
-    implicit val tFormatter = BEDInFormatter
-    implicit val uFormatter = new BEDOutFormatter
-    val output: FeatureRDD = input.pipe(macs2Command)
-    output.save("output.bed", true, false)
+    val macs2Command = "./run-macs2.sh " + args.outputPath
+    val inputFiles = args.inputPath.split(",")
+    // create RDD of filenames, one filename per partition
+    val input = sc.parallelize(inputFiles, inputFiles.length)
+    val output = input.pipe(macs2Command)
+    // force evaluation
+    output.count()
   }
 }

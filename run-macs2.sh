@@ -2,5 +2,8 @@
 
 set +x
 
-macs2 callpeak -t /dev/stdin
-cat NA_summits.bed
+inputFile=`cat`
+outputPath=$1
+
+macs2 callpeak -t ${inputFile} -n ${inputFile} --outdir ${outputPath}/${inputFile}_output
+cat ${outputPath}/${inputFile}_output/${inputFile}_summits.bed
