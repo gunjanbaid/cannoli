@@ -29,27 +29,31 @@ import org.kohsuke.args4j.{ Argument, Option => Args4jOption }
 import org.apache.spark.rdd.RDD
 import org.apache.spark.HashPartitioner
 import org.bdgenomics.adam.models._
+import org.bdgenomics.formats.avro.Feature
 
-object Macs2 extends BDGCommandCompanion {
+object MACS2 extends BDGCommandCompanion {
   val commandName = "macs2"
   val commandDescription = "ADAM Pipe API wrapper for MACS2."
 
   def apply(cmdLine: Array[String]) = {
-    new Macs2(Args4j[Macs2Args](cmdLine))
+    new MACS2(Args4j[MACS2Args](cmdLine))
   }
 }
 
-class Macs2Args extends Args4jBase with ADAMSaveAnyArgs with ParquetArgs {
-  @Argument(required = true, metaVar = "function", usage = "Location to pipe from, in interleaved FASTQ format.", index = 0)
+class MACS2Args extends Args4jBase with ADAMSaveAnyArgs with ParquetArgs {
+  @Argument(required = true, metaVar = "function", usage = "MACS2 function to perform. Only callpeak is currently supported.", index = 0)
   var function: String = null
 
-  @Argument(required = true, metaVar = "INPUT", usage = "Location to pipe from, in interleaved FASTQ format.", index = 1)
+  @Argument(required = true, metaVar = "INPUT", usage = "Location to pipe from.", index = 1)
   var inputPath: String = null
 
   @Argument(required = true, metaVar = "OUTPUT", usage = "Location to pipe to.", index = 2)
   var outputPath: String = null
 
-  @Args4jOption(required = false, name = "-single", usage = "Saves OUTPUT as single file.")
+  @Args4jOption(required = true, name = "-macs2_output", usage = "Folder in which MACS2 output is saved.")
+  var macs2OutputPath: String = false
+
+  @Args4jOcption(required = false, name = "-single", usage = "Saves OUTPUT as single file.")
   var asSingleFile: Boolean = false
 
   @Args4jOption(required = false, name = "-defer_merging", usage = "Defers merging single file output.")
@@ -68,17 +72,42 @@ class Macs2Args extends Args4jBase with ADAMSaveAnyArgs with ParquetArgs {
 /**
  * MACS2.
  */
-class Macs2(protected val args: Macs2Args) extends BDGSparkCommand[Macs2Args] with Logging {
-  val companion = Macs2
+class MACS2(protected val args: MACS2Args) extends BDGSparkCommand[MACS2Args] with Logging {
+  val companion = MACS2
   val stringency = ValidationStringency.valueOf(args.stringency)
 
   def run(sc: SparkContext) {
-    val macs2Command = "./run-macs2.sh " + args.outputPath
+    val MACS2Command = "/home/eecs/gunjan/all-adam/cannoli/run-macs2.sh " + args.macs2OutputPath
     val inputFiles = args.inputPath.split(",")
     // create RDD of filenames, one filename per partition
     val input = sc.parallelize(inputFiles, inputFiles.length)
-    val output = input.pipe(macs2Command)
-    // force evaluation
-    output.count()
+    val outputFiles = input.pipe(MACS2Command)
+    // force creation of MACS2 files
+    outputFiles.count()
+
+    // union all BED files from MACS2
+    var outputUnion: RDD[Feature] = null
+    for (filename <- outputFiles.collect()) {
+      val features = sc.loadFeatures(filename)
+      // update the source field for each feature
+      // this does not have any real effect since
+      // source does not show up when rdd saved to BED file
+      features.rdd.map(feature => feature.source = filename)
+      outputUnion = if (outputUnion != null) {
+        outputUnion.union(features.rdd)
+      } else {
+        features.rdd
+      }
+    }
+
+    // convert RDD[Feature] to FeatureRDD
+    val output: FeatureRDD = FeatureRDD.apply(outputUnion, null)
+    output.save(args.outputPath,
+      asSingleFile = args.asSingleFile,
+      disableFastConcat = args.disableFastConcat)
+    // clean up MACS2 output files
+    val outputDelete = sc.parallelize(Seq(args.macs2OutputPath), 1).pipe("xargs -I% rm -r -f %")
+    // force deletion of MACS2 files
+    outputDelete.count()
   }
 }

@@ -4,6 +4,8 @@ set +x
 
 inputFile=`cat`
 outputPath=$1
+fileName=`basename $inputFile`
 
-macs2 callpeak -t ${inputFile} -n ${inputFile} --outdir ${outputPath}/${inputFile}_output
-cat ${outputPath}/${inputFile}_output/${inputFile}_summits.bed
+/home/eecs/gunjan/envs/gunjan/bin/macs2 callpeak -t ${inputFile} -n ${fileName} --outdir ${outputPath}/${fileName}_output
+echo file:${outputPath}/${fileName}_output/${fileName}_summits.bed
+
