@@ -30,6 +30,7 @@ object Cannoli {
       Bowtie2,
       Bwa,
       Freebayes,
+      MACS2,
       SnpEff)),
       CommandGroup("CANNOLI TOOLS", List(InterleaveFastq, SampleReads)))
     new ADAMMain(defaultCommandGroups.union(commandGroup))(args)
