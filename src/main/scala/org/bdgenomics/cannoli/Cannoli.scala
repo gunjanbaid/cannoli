@@ -32,7 +32,7 @@ object Cannoli {
       Freebayes,
       MACS2,
       SnpEff)),
-      CommandGroup("CANNOLI TOOLS", List(InterleaveFastq)))
+      CommandGroup("CANNOLI TOOLS", List(InterleaveFastq, SampleReads)))
     new ADAMMain(defaultCommandGroups.union(commandGroup))(args)
   }
 }
