@@ -53,9 +53,6 @@ class MACS2Args extends Args4jBase with ADAMSaveAnyArgs with ParquetArgs {
   @Argument(required = true, metaVar = "OUTPUT", usage = "Location to pipe to.", index = 2)
   var outputPath: String = null
 
-  @Args4jOption(required = true, name = "-macs2_output", usage = "Folder in which MACS2 output is saved.")
-  var macs2OutputPath: String = null
-
   @Args4jOption(required = false, name = "-single", usage = "Saves OUTPUT as single file.")
   var asSingleFile: Boolean = false
 
@@ -80,27 +77,20 @@ class MACS2(protected val args: MACS2Args) extends BDGSparkCommand[MACS2Args] wi
   val stringency = ValidationStringency.valueOf(args.stringency)
 
   def run(sc: SparkContext) {
-    val MACS2Command = "/home/eecs/gunjan/cannoli/run-macs2.sh " + args.macs2OutputPath
+    val MACS2Command = "/home/eecs/gunjan/cannoli/run-macs2.sh"
     val inputFiles = args.inputPath.split(",")
-    var input: AlignmentRecordRDD = null
-    for (file <- inputFiles) {
-      val alignments: AlignmentRecordRDD = sc.loadAlignments(file)
-      var alignmentsWithFile: AlignmentRecordRDD = alignments.transform(_.map(read => { read.setQual("HELLO"); read }))
-//      var alignmentsWithFile: AlignmentRecordRDD = alignments.transform(_.map(read => { read.setQual(file); read }))
-      alignmentsWithFile = alignmentsWithFile.transform(_.repartition(1))
-      input = if (input != null) {
-        alignmentsWithFile.union(input)
-      } else {
-        alignmentsWithFile
-      }
-    }
-
-    print(input.rdd.first)
-
+    //val output = sc.parallelize(inputFiles).pipe(MACS2Command)
+    //println(output.first)
+    var input: AlignmentRecordRDD = sc.loadAlignments(args.inputPath)
+    input = input.transform(_.repartition(1))
+    println(input.rdd.getNumPartitions)
     implicit val tFormatter = BAMInFormatter
     implicit val uFormatter = new BEDOutFormatter
-    val output: FeatureRDD = input.pipe(MACS2Command)
-    output.save(args.outputPath, args.asSingleFile, args.disableFastConcat)
+    var output: FeatureRDD = input.pipe(MACS2Command)
+    //println(output.rdd.count())
+    //output.rdd.count
+    //println(output.rdd.first)
+    //output.save(args.outputPath, args.asSingleFile, args.disableFastConcat)
 
   }
 }
