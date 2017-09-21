@@ -78,19 +78,27 @@ class MACS2(protected val args: MACS2Args) extends BDGSparkCommand[MACS2Args] wi
 
   def run(sc: SparkContext) {
     val MACS2Command = "/home/eecs/gunjan/cannoli/run-macs2.sh"
-    val inputFiles = args.inputPath.split(",")
-    //val output = sc.parallelize(inputFiles).pipe(MACS2Command)
-    //println(output.first)
-    var input: AlignmentRecordRDD = sc.loadAlignments(args.inputPath)
-    input = input.transform(_.repartition(1))
-    println(input.rdd.getNumPartitions)
-    implicit val tFormatter = BAMInFormatter
-    implicit val uFormatter = new BEDOutFormatter
-    var output: FeatureRDD = input.pipe(MACS2Command)
-    //println(output.rdd.count())
-    //output.rdd.count
-    //println(output.rdd.first)
-    //output.save(args.outputPath, args.asSingleFile, args.disableFastConcat)
+    if (args.inputPath.endsWith(".bed")) {
+      val input: FeatureRDD = sc.loadFeatures(args.inputPath)
+      //input = input.transform(_.repartition(20))
+      implicit val tFormatter = BEDInFormatter
+      implicit val uFormatter = new BEDOutFormatter
+      print(input.rdd.getNumPartitions)
+      val output: FeatureRDD = input.pipe(MACS2Command)
+      output.save(args.outputPath,
+        asSingleFile = args.asSingleFile,
+        disableFastConcat = args.disableFastConcat)
+    } else {
+      var input: AlignmentRecordRDD = sc.loadAlignments(args.inputPath)
+      //input = input.transform(_.repartition(1))
+      implicit val tFormatter = BAMInFormatter
+      implicit val uFormatter = new BEDOutFormatter
+      print(input.rdd.getNumPartitions)
+      val output: FeatureRDD = input.pipe(MACS2Command)
+      output.save(args.outputPath,
+        asSingleFile = args.asSingleFile,
+        disableFastConcat = args.disableFastConcat)
+    }
 
   }
 }
