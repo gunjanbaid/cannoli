@@ -33,6 +33,9 @@ import org.bdgenomics.formats.avro.Feature
 import org.bdgenomics.formats.avro.{ Feature, AlignmentRecord }
 import org.bdgenomics.adam.rdd.read.{ AlignmentRecordRDD, AnySAMOutFormatter }
 import org.bdgenomics.adam.rdd.read.{ AlignmentRecordRDD, BAMInFormatter }
+import org.bdgenomics.adam.models.SequenceDictionary
+import org.bdgenomics.adam.rdd.GenomicPositionPartitioner
+import org.bdgenomics.adam.models.ReferencePosition
 
 object MACS2 extends BDGCommandCompanion {
   val commandName = "macs2"
@@ -78,27 +81,29 @@ class MACS2(protected val args: MACS2Args) extends BDGSparkCommand[MACS2Args] wi
 
   def run(sc: SparkContext) {
     val MACS2Command = "/home/eecs/gunjan/cannoli/run-macs2.sh"
-    if (args.inputPath.endsWith(".bed")) {
-      val input: FeatureRDD = sc.loadFeatures(args.inputPath)
-      //input = input.transform(_.repartition(20))
-      implicit val tFormatter = BEDInFormatter
-      implicit val uFormatter = new BEDOutFormatter
-      print(input.rdd.getNumPartitions)
-      val output: FeatureRDD = input.pipe(MACS2Command)
-      output.save(args.outputPath,
-        asSingleFile = args.asSingleFile,
-        disableFastConcat = args.disableFastConcat)
-    } else {
-      var input: AlignmentRecordRDD = sc.loadAlignments(args.inputPath)
-      //input = input.transform(_.repartition(1))
-      implicit val tFormatter = BAMInFormatter
-      implicit val uFormatter = new BEDOutFormatter
-      print(input.rdd.getNumPartitions)
-      val output: FeatureRDD = input.pipe(MACS2Command)
-      output.save(args.outputPath,
-        asSingleFile = args.asSingleFile,
-        disableFastConcat = args.disableFastConcat)
-    }
+    //var input: AlignmentRecordRDD = null
+    //val inputFiles = args.inputPath.split(",")
+    //for (file <- inputFiles) {
+    //  var reads: AlignmentRecordRDD = sc.loadAlignments(file)
+    //  val parter = GenomicPositionPartitioner(reads.sequences.size, reads.sequences)
+    //  reads = reads.transform(_.keyBy(r => ReferencePosition(r.getContigName, r.getStart)).partitionBy(parter).map(_._2).coalesce(7))
+    //  input = if (input != null) {
+    //    reads.union(input)
+    //  } else {
+    //    reads
+    //  }
+    // }
 
+    var reads: AlignmentRecordRDD = sc.loadAlignments(args.inputPath)
+    val parter = GenomicPositionPartitioner(reads.sequences.size, reads.sequences)
+    val reads2 = reads.transform(_.keyBy(r => ReferencePosition(r.getContigName, r.getStart)).partitionBy(parter).map(_._2).coalesce(7))
+    implicit val tFormatter = BAMInFormatter
+    implicit val uFormatter = new BEDOutFormatter
+    val output: FeatureRDD = reads2.pipe(MACS2Command, repartitionRDD = false)
+
+    output.save(args.outputPath,
+      asSingleFile = args.asSingleFile,
+      disableFastConcat = args.disableFastConcat)
   }
 }
+
