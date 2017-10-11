@@ -103,7 +103,7 @@ class MACS2(protected val args: MACS2Args) extends BDGSparkCommand[MACS2Args] wi
 
     implicit val tFormatter = BAMInFormatter
     implicit val uFormatter = new BEDOutFormatter
-    val output: FeatureRDD = input.pipe(MACS2Command, repartitionRDD = false)
+    val output: FeatureRDD = input.pipe(MACS2Command, repartitionInput = false, filterOutput = false)
     output.save(args.outputPath,
       asSingleFile = args.asSingleFile,
       disableFastConcat = args.disableFastConcat)
