@@ -56,6 +56,9 @@ class MACS2Args extends Args4jBase with ADAMSaveAnyArgs with ParquetArgs {
   @Argument(required = true, metaVar = "OUTPUT", usage = "Location to pipe to.", index = 2)
   var outputPath: String = null
 
+  @Args4jOption(required = false, name = "-partitions", usage = "Number of paritions to create for each file.")
+  var numPartitions: Integer = 5
+
   @Args4jOption(required = false, name = "-single", usage = "Saves OUTPUT as single file.")
   var asSingleFile: Boolean = false
 
@@ -81,26 +84,26 @@ class MACS2(protected val args: MACS2Args) extends BDGSparkCommand[MACS2Args] wi
 
   def run(sc: SparkContext) {
     val MACS2Command = "/home/eecs/gunjan/cannoli/run-macs2.sh"
-    //var input: AlignmentRecordRDD = null
-    //val inputFiles = args.inputPath.split(",")
-    //for (file <- inputFiles) {
-    //  var reads: AlignmentRecordRDD = sc.loadAlignments(file)
-    //  val parter = GenomicPositionPartitioner(reads.sequences.size, reads.sequences)
-    //  reads = reads.transform(_.keyBy(r => ReferencePosition(r.getContigName, r.getStart)).partitionBy(parter).map(_._2).coalesce(7))
-    //  input = if (input != null) {
-    //    reads.union(input)
-    //  } else {
-    //    reads
-    //  }
-    // }
+    val inputFiles = args.inputPath.split(",")
+    var input: AlignmentRecordRDD = null
+    for (file <- inputFiles) {
+      var reads: AlignmentRecordRDD = sc.loadAlignments(file)
+      var parter = GenomicPositionPartitioner(reads.sequences.size, reads.sequences)
+      reads = reads.transform(_.map(r => { r.setReadName(file); r })
+        .keyBy(r => ReferencePosition(r.getContigName, r.getStart))
+        .partitionBy(parter)
+        .map(_._2)
+        .coalesce(args.numPartitions))
+      input = if (input != null) {
+        reads.union(input)
+      } else {
+        reads
+      }
+    }
 
-    var reads: AlignmentRecordRDD = sc.loadAlignments(args.inputPath)
-    val parter = GenomicPositionPartitioner(reads.sequences.size, reads.sequences)
-    val reads2 = reads.transform(_.keyBy(r => ReferencePosition(r.getContigName, r.getStart)).partitionBy(parter).map(_._2).coalesce(7))
     implicit val tFormatter = BAMInFormatter
     implicit val uFormatter = new BEDOutFormatter
-    val output: FeatureRDD = reads2.pipe(MACS2Command, repartitionRDD = false)
-
+    val output: FeatureRDD = input.pipe(MACS2Command, repartitionRDD = false)
     output.save(args.outputPath,
       asSingleFile = args.asSingleFile,
       disableFastConcat = args.disableFastConcat)

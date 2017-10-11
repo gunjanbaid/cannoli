@@ -1,30 +1,26 @@
 #!/bin/bash
 
 set +x
+
+# generate unique ID for each partition
+# so files with default names not overwritten
 uuid=$(uuidgen)
+# save input BAM records to a temp file
 tee /tmp/datafile-${uuid} > /dev/null
-#rm -r -f NA_summits.bed
+
+# qname column replaced with original filename
+# extract original filename
+name=`/home/eecs/gunjan/envs/gunjan/bin/samtools view /tmp/datafile-${uuid} | head -1 | cut -f1`
 /home/eecs/gunjan/envs/gunjan/bin/macs2 callpeak -t /tmp/datafile-${uuid} --verbose 0 --outdir /tmp -n ${uuid}
-#fileName=HELLO
-#awk -v file="$fileName" 'BEGIN{OFS="\t"}{$4=file}1' NA_summits.bed
-#if [ -f /tmp/*summits.bed ]; then
-#    cat /tmp/*summits.bed
-#fi
 
-cat /tmp/${uuid}_summits.bed 2>/dev/null
+# replace name column with original filename
+# output BED records
+awk -v file="$name" 'BEGIN{OFS="\t"}{$4=file}1' /tmp/${uuid}_summits.bed 2>/dev/null
 
+# clean up temp datafile and all MACS2 files
 rm -rf /tmp/datafile-${uuid}
 rm -rf /tmp/${uuid}_summits.bed
 rm -rf /tmp/${uuid}_peaks.xls
 rm -rf /tmp/${uuid}_model.r 
 rm -rf /tmp/${uuid}_peaks.narrowPeak
-
-
-#tee hi.txt > /dev/null
-#cp /home/eecs/gunjan/all-adam/cannoli/test.bed gunjan.bed
-#cat gunjan.bed
-#/home/eecs/gunjan/envs/gunjan/bin/macs2 callpeak -t test.bed -n HI
-
-#cat /home/eecs/gunjan/all-adam/cannoli/test.bed
-#cat HI_summits.bed
 
